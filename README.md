@@ -37,6 +37,42 @@ cp .env.example .env.local
 npm run dev
 ```
 
+## 🔁 CI/CD (GitHub Actions)
+
+В репозитории добавлен workflow: `.github/workflows/ci-cd.yml`.
+
+- Для каждого `push` и `pull_request`: `npm ci` → `npm run lint` → `npm run build`.
+- Для `push` в default ветку репозитория: автоматический деплой на сервер по SSH и перезапуск через Docker Compose.
+
+### GitHub Secrets
+
+Добавьте в `Settings -> Secrets and variables -> Actions`:
+
+- `SSH_HOST` — IP/домен прод-сервера.
+- `SSH_PORT` — SSH порт (обычно `22`).
+- `SSH_USER` — пользователь на сервере.
+- `SSH_PRIVATE_KEY` — приватный ключ для доступа по SSH.
+- `DEPLOY_PATH` — путь к проекту на сервере, например `/opt/knigaprome`.
+- `SSH_KNOWN_HOSTS` (опционально) — строка known_hosts для сервера.
+
+### Первичная настройка сервера
+
+```bash
+# 1) Установить Docker + Docker Compose plugin
+# 2) Клонировать проект в DEPLOY_PATH
+git clone <your-repo-url> /opt/knigaprome
+cd /opt/knigaprome
+
+# 3) Создать .env.production
+cp .env.example .env.production
+# заполнить переменные
+
+# 4) Первый запуск
+docker compose -f docker-compose.prod.yml up -d --build
+```
+
+После этого каждый пуш в default ветку будет автоматически деплоиться.
+
 ## 📁 Структура
 
 ```

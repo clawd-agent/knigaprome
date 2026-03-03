@@ -1,16 +1,5 @@
 import type { Metadata } from 'next'
-import { Comfortaa, Nunito } from 'next/font/google'
 import './globals.css'
-
-const comfortaa = Comfortaa({ 
-  subsets: ['cyrillic', 'latin'],
-  variable: '--font-display',
-})
-
-const nunito = Nunito({ 
-  subsets: ['cyrillic', 'latin'],
-  variable: '--font-body',
-})
 
 export const metadata: Metadata = {
   title: 'Книга Про Меня — Персональная сказка с вашим ребёнком',
@@ -30,7 +19,7 @@ export default function RootLayout({
   children: React.ReactNode
 }) {
   return (
-    <html lang="ru" className={`${comfortaa.variable} ${nunito.variable}`}>
+    <html lang="ru">
       <body className="font-body bg-gradient-to-b from-purple-50 to-white min-h-screen">
         {children}
       </body>

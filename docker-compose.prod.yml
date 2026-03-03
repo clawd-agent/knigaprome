@@ -1,0 +1,13 @@
+services:
+  knigaprome:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: knigaprome-app
+    env_file:
+      - .env.production
+    ports:
+      - "3001:3000"
+    restart: unless-stopped
+    volumes:
+      - ./data/generated:/app/public/generated

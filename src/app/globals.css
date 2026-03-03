@@ -13,11 +13,11 @@ body {
 }
 
 .font-display {
-  font-family: var(--font-display), 'Comfortaa', cursive;
+  font-family: "Trebuchet MS", "Segoe UI", "Arial Rounded MT Bold", "Helvetica Neue", Arial, sans-serif;
 }
 
 .font-body {
-  font-family: var(--font-body), 'Nunito', sans-serif;
+  font-family: "Segoe UI", "Helvetica Neue", Arial, sans-serif;
 }
 
 /* Волшебные анимации */
