@@ -32,12 +32,13 @@ export default function Home() {
   const [error, setError] = useState('')
   const [story, setStory] = useState<GeneratedStory | null>(null)
   const [progress, setProgress] = useState('')
-  const [isMobile, setIsMobile] = useState(false)
+  const [isMobileReading, setIsMobileReading] = useState(false)
   
-  // Detect mobile viewport
+  // Detect mobile/tablet viewport for reading mode
   useEffect(() => {
     const checkMobile = () => {
-      setIsMobile(window.innerWidth < 768)
+      // До 1024px используем мобильный вертикальный ридер (телефоны + планшеты)
+      setIsMobileReading(window.innerWidth < 1024)
     }
     checkMobile()
     window.addEventListener('resize', checkMobile)
@@ -164,7 +165,7 @@ export default function Home() {
   // Показываем книгу в формате превью
   if (story) {
     // Мобильная версия — полноэкранный вертикальный скролл
-    if (isMobile) {
+    if (isMobileReading) {
       return (
         <>
           {/* Кнопка "назад" поверх превью */}
