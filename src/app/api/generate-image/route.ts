@@ -4,72 +4,73 @@ import { writeFileSync, mkdirSync, existsSync } from 'fs';
 import { join } from 'path';
 
 const PROXYAPI_KEY = process.env.PROXYAPI_KEY || '';
-const GEMINI_IMAGE_ENDPOINT =
-  'https://api.proxyapi.ru/google/v1beta/models/gemini-2.5-flash-image:generateContent';
+const OPENAI_IMAGE_ENDPOINT = 'https://api.proxyapi.ru/openai/v1/images/generations';
+const IMAGE_MODEL = process.env.OPENAI_IMAGE_MODEL || 'gpt-image-1';
 
-function callGeminiFlashImage(prompt: string, referencePhoto?: string): { base64: string; mimeType: string } {
-  const parts: Array<Record<string, unknown>> = [{ text: `Generate one children book illustration: ${prompt}` }];
+function mapSizeByOrientation(orientation?: string): '1024x1536' | '1536x1024' | '1024x1024' {
+  if (orientation === 'landscape') return '1536x1024';
+  if (orientation === 'square') return '1024x1024';
+  return '1024x1536';
+}
 
-  if (referencePhoto?.startsWith('data:image/')) {
-    const match = referencePhoto.match(/^data:(image\/[\w+.-]+);base64,(.+)$/);
-    if (match) {
-      parts.push({
-        inlineData: {
-          mimeType: match[1],
-          data: match[2],
-        },
-      });
-    }
-  }
-
+function callProxyOpenAIImage(prompt: string, size: string): { imageBuffer: Buffer; ext: 'png' | 'jpg' } {
   const payload = JSON.stringify({
-    contents: [
-      {
-        parts,
-      },
-    ],
-    generationConfig: {
-      responseModalities: ['IMAGE', 'TEXT'],
-    },
+    model: IMAGE_MODEL,
+    prompt,
+    size,
+    n: 1,
+    response_format: 'b64_json',
   });
 
-  // Важно: не передаём payload через аргумент -d '<json>' — на больших base64 это даёт E2BIG.
-  // Пишем JSON во временный файл и отправляем -d @file.
-  const payloadPath = `/tmp/gemini-image-payload-${Date.now()}.json`;
+  const payloadPath = `/tmp/openai-image-payload-${Date.now()}.json`;
   writeFileSync(payloadPath, payload);
 
-  const result = execSync(
-    `curl -s -X POST "${GEMINI_IMAGE_ENDPOINT}" \\
+  const raw = execSync(
+    `curl -s -X POST "${OPENAI_IMAGE_ENDPOINT}" \\
       -H "Authorization: Bearer ${PROXYAPI_KEY}" \\
       -H "Content-Type: application/json" \\
       -d @${payloadPath}`,
     {
       encoding: 'utf-8',
-      timeout: 90000,
-      maxBuffer: 20 * 1024 * 1024,
+      timeout: 120000,
+      maxBuffer: 30 * 1024 * 1024,
     }
   );
 
-  const data = JSON.parse(result);
-  const responseParts = data?.candidates?.[0]?.content?.parts || [];
+  const data = JSON.parse(raw);
 
-  for (const part of responseParts) {
-    const inline = part.inlineData || part.inline_data;
-    if (inline?.data) {
-      return {
-        base64: inline.data,
-        mimeType: inline.mimeType || inline.mime_type || 'image/png',
-      };
-    }
+  if (data?.error) {
+    throw new Error(data.error?.message || JSON.stringify(data.error));
   }
 
-  throw new Error('Gemini не вернул изображение');
+  const item = data?.data?.[0];
+  if (!item) {
+    throw new Error('OpenAI images: пустой ответ');
+  }
+
+  if (item.b64_json) {
+    return {
+      imageBuffer: Buffer.from(item.b64_json, 'base64'),
+      ext: 'png',
+    };
+  }
+
+  if (item.url) {
+    const downloaded = execSync(`curl -sL "${item.url}"`, {
+      encoding: 'buffer',
+      timeout: 60000,
+      maxBuffer: 50 * 1024 * 1024,
+    });
+    return { imageBuffer: downloaded, ext: 'png' };
+  }
+
+  throw new Error('OpenAI images: не найден b64_json/url в ответе');
 }
 
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { prompt, storyId, chapterNumber, referencePhotos } = body;
+    const { prompt, storyId, chapterNumber, orientation } = body;
 
     if (!prompt || !storyId || chapterNumber === undefined) {
       return NextResponse.json(
@@ -85,24 +86,19 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const enhancedPrompt = `Children's book watercolor illustration, wide shot showing full scene with background and details. Soft ink outlines, cartoon proportions. ${prompt}. Full body view of character in environment, rich detailed background. Style: soft pastel watercolor washes, delicate pen outlines, warm gentle lighting, hand-painted storybook feel, professional children's book quality. NOT a portrait, NOT close-up.`;
+    const size = mapSizeByOrientation(orientation);
 
-    console.log(`🎨 Generating ch${chapterNumber} via Gemini 2.5 Flash Image...`);
+    const enhancedPrompt = `Children's book watercolor illustration. ${prompt}. Full scene with rich background details, soft ink outlines, warm gentle lighting, hand-painted storybook style. Not a close-up portrait.`;
 
-    const { base64, mimeType } = callGeminiFlashImage(
-      enhancedPrompt,
-      Array.isArray(referencePhotos) ? referencePhotos[0] : undefined
-    );
-    const imageBuffer = Buffer.from(base64, 'base64');
+    console.log(`🎨 Generating ch${chapterNumber} via ProxyAPI OpenAI images (${IMAGE_MODEL}, ${size})...`);
 
-    // В Docker проде public/generated примонтирован как volume (./data/generated:/app/public/generated)
-    // Поэтому сохраняем именно в public/generated, чтобы URL /generated/... сразу открывался.
+    const { imageBuffer, ext } = callProxyOpenAIImage(enhancedPrompt, size);
+
     const outputDir = process.env.GENERATED_OUTPUT_DIR || join(process.cwd(), 'public', 'generated');
     if (!existsSync(outputDir)) {
       mkdirSync(outputDir, { recursive: true });
     }
 
-    const ext = mimeType.includes('jpeg') || mimeType.includes('jpg') ? 'jpg' : 'png';
     const filename = `${storyId}-ch${chapterNumber}-${Date.now()}.${ext}`;
     const filePath = join(outputDir, filename);
     writeFileSync(filePath, imageBuffer);
@@ -112,7 +108,8 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({
       success: true,
       image_url: `/generated/${filename}`,
-      provider: 'gemini-2.5-flash-image',
+      provider: `proxyapi-openai/${IMAGE_MODEL}`,
+      size,
     });
   } catch (error) {
     console.error('Image generation error:', error);
