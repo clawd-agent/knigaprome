@@ -95,7 +95,9 @@ export async function POST(request: NextRequest) {
     );
     const imageBuffer = Buffer.from(base64, 'base64');
 
-    const outputDir = '/opt/knigaprome/generated';
+    // В Docker проде public/generated примонтирован как volume (./data/generated:/app/public/generated)
+    // Поэтому сохраняем именно в public/generated, чтобы URL /generated/... сразу открывался.
+    const outputDir = process.env.GENERATED_OUTPUT_DIR || join(process.cwd(), 'public', 'generated');
     if (!existsSync(outputDir)) {
       mkdirSync(outputDir, { recursive: true });
     }
