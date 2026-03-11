@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, FormEvent } from 'react'
+import { useState, useEffect, FormEvent, ChangeEvent } from 'react'
 import { Sparkles, Book, Wand2, Download, Star, Clock, Shield, Loader2, ChevronLeft } from 'lucide-react'
 import BookPreview from '@/components/BookPreview'
 import MobileBookPreview from '@/components/MobileBookPreview'
@@ -27,6 +27,8 @@ export default function Home() {
     interests: '',
   })
   const [generatingImage, setGeneratingImage] = useState<number | null>(null)
+  const [referencePhoto, setReferencePhoto] = useState<string>('')
+  const [referencePhotoName, setReferencePhotoName] = useState<string>('')
   const [isLoading, setIsLoading] = useState(false)
   const [downloadingPDF, setDownloadingPDF] = useState(false)
   const [error, setError] = useState('')
@@ -45,6 +47,39 @@ export default function Home() {
     return () => window.removeEventListener('resize', checkMobile)
   }, [])
 
+  const fileToBase64 = (file: File): Promise<string> => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader()
+      reader.onload = () => resolve(reader.result as string)
+      reader.onerror = () => reject(new Error('Не удалось прочитать файл'))
+      reader.readAsDataURL(file)
+    })
+  }
+
+  const handleReferencePhotoChange = async (e: ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+
+    if (!file.type.startsWith('image/')) {
+      setError('Можно загрузить только изображение')
+      return
+    }
+
+    if (file.size > 8 * 1024 * 1024) {
+      setError('Фото слишком большое. Максимум 8MB')
+      return
+    }
+
+    try {
+      const base64 = await fileToBase64(file)
+      setReferencePhoto(base64)
+      setReferencePhotoName(file.name)
+      setError('')
+    } catch {
+      setError('Не удалось загрузить фото')
+    }
+  }
+
   // Генерация картинки для конкретной главы
   const generateImage = async (chapterNumber: number) => {
     if (!story) return
@@ -62,6 +97,7 @@ export default function Home() {
           prompt: chapter.illustration_prompt,
           storyId: story.id,
           chapterNumber,
+          referencePhotos: referencePhoto ? [referencePhoto] : [],
         }),
       })
       
@@ -412,6 +448,38 @@ export default function Home() {
                   onChange={(e) => setFormData({...formData, interests: e.target.value})}
                   disabled={isLoading}
                 />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium mb-2">Фото ребёнка (для похожего персонажа)</label>
+                <input
+                  type="file"
+                  accept="image/*"
+                  onChange={handleReferencePhotoChange}
+                  disabled={isLoading}
+                  className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:border-primary focus:outline-none transition file:mr-3 file:px-3 file:py-2 file:rounded-lg file:border-0 file:bg-purple-100 file:text-purple-700 file:font-medium"
+                />
+                <p className="mt-2 text-xs text-gray-500">
+                  Опционально. Используем как референс для генерации иллюстраций (jpg/png, до 8MB).
+                </p>
+                {referencePhoto && (
+                  <div className="mt-3 flex items-center gap-3">
+                    <img src={referencePhoto} alt="Фото-референс" className="w-14 h-14 object-cover rounded-lg border" />
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm text-gray-700 truncate">{referencePhotoName}</p>
+                      <button
+                        type="button"
+                        className="text-xs text-red-500 hover:text-red-600"
+                        onClick={() => {
+                          setReferencePhoto('')
+                          setReferencePhotoName('')
+                        }}
+                      >
+                        Удалить фото
+                      </button>
+                    </div>
+                  </div>
+                )}
               </div>
               
               <button
