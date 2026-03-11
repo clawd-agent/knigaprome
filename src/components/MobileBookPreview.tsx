@@ -1,7 +1,7 @@
 'use client'
 
-import { useState, useRef } from 'react'
-import { Loader2, Wand2, RefreshCw, Download, Printer } from 'lucide-react'
+import { useMemo, useState } from 'react'
+import { Loader2, Wand2, RefreshCw, Download, ChevronLeft, ChevronRight } from 'lucide-react'
 
 interface Chapter {
   number: number
@@ -21,507 +21,170 @@ interface MobileBookPreviewProps {
   downloadingPDF?: boolean
 }
 
+type Page =
+  | { type: 'cover' }
+  | { type: 'chapter'; chapter: Chapter }
+  | { type: 'final' }
+
 export default function MobileBookPreview({
   title,
   childName,
   chapters,
-  storyId,
   onGenerateImage,
   generatingImage,
   onDownloadPDF,
   downloadingPDF,
 }: MobileBookPreviewProps) {
+  const pages = useMemo<Page[]>(
+    () => [{ type: 'cover' }, ...chapters.map((c) => ({ type: 'chapter' as const, chapter: c })), { type: 'final' }],
+    [chapters]
+  )
   const [currentPage, setCurrentPage] = useState(0)
-  const containerRef = useRef<HTMLDivElement>(null)
-  
-  // Total pages: cover + dedication + chapters + end
-  const totalPages = chapters.length + 3
-  
-  const scrollToPage = (index: number) => {
-    const container = containerRef.current
-    if (!container) return
-    
-    const pageHeight = container.clientHeight
-    container.scrollTo({
-      top: pageHeight * index,
-      behavior: 'smooth'
-    })
-  }
-  
-  const handleScroll = () => {
-    const container = containerRef.current
-    if (!container) return
-    
-    const pageHeight = container.clientHeight
-    const scrollTop = container.scrollTop
-    const newPage = Math.round(scrollTop / pageHeight)
-    
-    if (newPage !== currentPage) {
-      setCurrentPage(newPage)
-    }
-  }
+
+  const totalPages = pages.length
+  const nextPage = () => setCurrentPage((p) => Math.min(totalPages - 1, p + 1))
+  const prevPage = () => setCurrentPage((p) => Math.max(0, p - 1))
 
   return (
-    <div className="mobile-book-container">
-      {/* Scrollable pages */}
-      <div 
-        ref={containerRef}
-        className="mobile-book-scroll"
-        onScroll={handleScroll}
-      >
-        {/* Cover */}
-        <div className="mobile-page cover">
-          <div className="page-content">
-            <div className="cover-icon">✨</div>
-            <h1 className="cover-title">{title}</h1>
-            <div className="cover-divider" />
-            <p className="cover-subtitle">Сказка для</p>
-            <p className="cover-name">{childName}</p>
-            <div className="cover-book">📚</div>
-            <p className="cover-hint">Листайте вниз ↓</p>
-          </div>
-        </div>
-        
-        {/* Dedication */}
-        <div className="mobile-page dedication">
-          <div className="page-content">
-            <div className="dedication-icon">💝</div>
-            <p className="dedication-text">
-              Эта волшебная книга<br />
-              создана специально для
-            </p>
-            <p className="dedication-name">{childName}</p>
-            <p className="dedication-from">с любовью от Книга Про Меня</p>
-          </div>
-        </div>
-        
-        {/* Chapters */}
-        {chapters.map((chapter) => (
-          <div key={chapter.number} className="mobile-page chapter">
-            {/* Image area */}
-            <div className="chapter-image-area">
-              {chapter.image_url ? (
-                <>
-                  <img
-                    src={chapter.image_url}
-                    alt={`Глава ${chapter.number}`}
-                    className="chapter-image"
-                  />
-                  <button
-                    onClick={() => onGenerateImage(chapter.number)}
-                    disabled={generatingImage !== null}
-                    className="regenerate-btn"
-                  >
-                    <RefreshCw className="w-4 h-4" />
+    <div className="viewer-root">
+      <div className="progress-wrap">
+        {pages.map((_, i) => (
+          <div key={i} className={`progress-bar ${i <= currentPage ? 'active' : ''}`} />
+        ))}
+      </div>
+
+      <div className="page-container">
+        {pages.map((page, index) => {
+          const cls = index === currentPage ? 'active' : index < currentPage ? 'prev' : 'next'
+
+          if (page.type === 'cover') {
+            return (
+              <div key={`cover-${index}`} className={`page ${cls} cover`} onClick={nextPage}>
+                <div className="overlay" />
+                <div className="content-center">
+                  <h1 className="cover-title">{title}</h1>
+                  <h2 className="cover-subtitle">A Story for {childName}</h2>
+                </div>
+                <div className="tap-start">
+                  <div className="bounce">⌃</div>
+                  <p>Tap to Start</p>
+                </div>
+              </div>
+            )
+          }
+
+          if (page.type === 'final') {
+            return (
+              <div key={`final-${index}`} className={`page ${cls} final`}>
+                <div className="overlay light" />
+                <div className="final-card">
+                  <h1>The End</h1>
+                  <p>Надеюсь, приключение понравилось, {childName}!</p>
+                  <button onClick={onDownloadPDF} disabled={downloadingPDF} className="download-btn">
+                    {downloadingPDF ? <Loader2 className="w-5 h-5 animate-spin" /> : <Download className="w-5 h-5" />}
+                    <span>Download PDF</span>
                   </button>
-                </>
+                </div>
+              </div>
+            )
+          }
+
+          const chapter = page.chapter
+          return (
+            <div key={`chapter-${chapter.number}`} className={`page ${cls} chapter`}>
+              {chapter.image_url ? (
+                <img src={chapter.image_url} alt={`Глава ${chapter.number}`} className="chapter-image" />
               ) : (
-                <button
-                  onClick={() => onGenerateImage(chapter.number)}
-                  disabled={generatingImage !== null}
-                  className="generate-image-btn"
-                >
-                  {generatingImage === chapter.number ? (
-                    <>
-                      <Loader2 className="w-10 h-10 animate-spin" />
-                      <span>Рисую картинку...</span>
-                    </>
-                  ) : (
-                    <>
-                      <Wand2 className="w-10 h-10" />
-                      <span>Нажмите для картинки</span>
-                    </>
-                  )}
+                <div className="chapter-image placeholder">
+                  <button onClick={() => onGenerateImage(chapter.number)} disabled={generatingImage !== null} className="generate-btn">
+                    {generatingImage === chapter.number ? (
+                      <>
+                        <Loader2 className="w-9 h-9 animate-spin" />
+                        <span>Рисую картинку...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Wand2 className="w-9 h-9" />
+                        <span>Сгенерировать иллюстрацию</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+              )}
+
+              <div className="overlay" />
+              <div className="chapter-text-wrap">
+                <h1>{chapter.text}</h1>
+              </div>
+
+              {chapter.image_url && (
+                <button onClick={() => onGenerateImage(chapter.number)} disabled={generatingImage !== null} className="regen-btn">
+                  <RefreshCw className="w-4 h-4" />
                 </button>
               )}
             </div>
-            
-            {/* Text area */}
-            <div className="chapter-text-area">
-              <div className="chapter-number">Глава {chapter.number}</div>
-              <p className="chapter-text">{chapter.text}</p>
-            </div>
-          </div>
-        ))}
-        
-        {/* End page */}
-        <div className="mobile-page ending">
-          <div className="page-content">
-            <div className="ending-icon">🎉</div>
-            <h2 className="ending-title">Конец!</h2>
-            <p className="ending-text">
-              Понравилась сказка?<br />
-              Сохраните её навсегда!
-            </p>
-            
-            <div className="ending-buttons">
-              <button 
-                onClick={onDownloadPDF}
-                disabled={downloadingPDF}
-                className="ending-btn primary"
-              >
-                {downloadingPDF ? (
-                  <Loader2 className="w-5 h-5 animate-spin" />
-                ) : (
-                  <Download className="w-5 h-5" />
-                )}
-                <span>Скачать PDF — 490₽</span>
-              </button>
-              
-              <button className="ending-btn secondary">
-                <Printer className="w-5 h-5" />
-                <span>Печатная книга — 1490₽</span>
-              </button>
-            </div>
-            
-            <p className="ending-hint">
-              💡 Сгенерируйте картинки для всех глав
-            </p>
-          </div>
-        </div>
+          )
+        })}
       </div>
-      
-      {/* Dots navigation */}
-      <div className="mobile-dots">
-        {Array.from({ length: totalPages }).map((_, i) => (
-          <button
-            key={i}
-            onClick={() => scrollToPage(i)}
-            className={`mobile-dot ${currentPage === i ? 'active' : ''}`}
-            aria-label={`Страница ${i + 1}`}
-          />
-        ))}
-      </div>
-      
-      {/* Page counter */}
-      <div className="mobile-counter">
-        {currentPage + 1} / {totalPages}
-      </div>
-      
+
+      <button className="tap-zone left" onClick={prevPage} aria-label="Previous page" />
+      <button className="tap-zone right" onClick={nextPage} aria-label="Next page" />
+
+      <div className="hint left"><ChevronLeft className="w-8 h-8" /></div>
+      <div className="hint right"><ChevronRight className="w-8 h-8" /></div>
+
+      <div className="page-indicator">Page {currentPage + 1} of {totalPages}</div>
+
       <style jsx>{`
-        .mobile-book-container {
-          position: fixed;
-          inset: 0;
-          background: #1a1a2e;
-          z-index: 50;
-        }
-        
-        .mobile-book-scroll {
-          height: 100%;
-          overflow-y: auto;
-          scroll-snap-type: y mandatory;
-          -webkit-overflow-scrolling: touch;
-        }
-        
-        .mobile-page {
-          height: 100vh;
-          height: 100dvh;
-          scroll-snap-align: start;
-          scroll-snap-stop: always;
-          display: flex;
-          flex-direction: column;
-        }
-        
-        /* Cover page */
-        .mobile-page.cover {
-          background: linear-gradient(135deg, #7c3aed 0%, #ec4899 100%);
-        }
-        
-        .mobile-page.cover .page-content {
-          flex: 1;
-          display: flex;
-          flex-direction: column;
-          align-items: center;
-          justify-content: center;
-          padding: 2rem;
-          color: white;
-          text-align: center;
-        }
-        
-        .cover-icon {
-          font-size: 4rem;
-          margin-bottom: 1.5rem;
-        }
-        
-        .cover-title {
-          font-size: 1.75rem;
-          font-weight: 700;
-          line-height: 1.2;
-          margin-bottom: 1rem;
-        }
-        
-        .cover-divider {
-          width: 4rem;
-          height: 3px;
-          background: rgba(255,255,255,0.5);
-          border-radius: 2px;
-          margin: 1rem 0;
-        }
-        
-        .cover-subtitle {
-          font-size: 1.125rem;
-          opacity: 0.9;
-        }
-        
-        .cover-name {
-          font-size: 1.5rem;
-          font-weight: 700;
-          margin-top: 0.25rem;
-        }
-        
-        .cover-book {
-          font-size: 3rem;
-          margin-top: 2rem;
-        }
-        
-        .cover-hint {
-          position: absolute;
-          bottom: 2rem;
-          font-size: 0.875rem;
-          opacity: 0.7;
-          animation: bounce 2s infinite;
-        }
-        
-        @keyframes bounce {
-          0%, 100% { transform: translateY(0); }
-          50% { transform: translateY(8px); }
-        }
-        
-        /* Dedication page */
-        .mobile-page.dedication {
-          background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%);
-        }
-        
-        .mobile-page.dedication .page-content {
-          flex: 1;
-          display: flex;
-          flex-direction: column;
-          align-items: center;
-          justify-content: center;
-          padding: 2rem;
-          text-align: center;
-        }
-        
-        .dedication-icon {
-          font-size: 3rem;
-          margin-bottom: 1.5rem;
-        }
-        
-        .dedication-text {
-          font-size: 1.25rem;
-          color: #78716c;
-          line-height: 1.6;
-          font-style: italic;
-        }
-        
-        .dedication-name {
-          font-size: 1.75rem;
-          font-weight: 700;
-          color: #7c3aed;
-          margin-top: 0.5rem;
-        }
-        
-        .dedication-from {
-          margin-top: 2rem;
-          font-size: 0.875rem;
-          color: #a8a29e;
-        }
-        
-        /* Chapter pages */
-        .mobile-page.chapter {
-          background: white;
-        }
-        
-        .chapter-image-area {
-          flex: 0 0 60%;
-          position: relative;
-          background: linear-gradient(135deg, #f3e8ff 0%, #fce7f3 100%);
-          display: flex;
-          align-items: center;
-          justify-content: center;
-        }
-        
-        .chapter-image {
-          width: 100%;
-          height: 100%;
-          object-fit: cover;
-        }
-        
-        .generate-image-btn {
-          display: flex;
-          flex-direction: column;
-          align-items: center;
-          gap: 0.75rem;
-          padding: 2rem;
-          color: #a855f7;
-          background: none;
-          border: none;
-          cursor: pointer;
-        }
-        
-        .generate-image-btn span {
-          font-size: 1rem;
-          color: #6b7280;
-        }
-        
-        .regenerate-btn {
-          position: absolute;
-          bottom: 1rem;
-          right: 1rem;
-          background: rgba(255,255,255,0.9);
-          border: none;
-          border-radius: 50%;
-          width: 40px;
-          height: 40px;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          cursor: pointer;
-          box-shadow: 0 2px 8px rgba(0,0,0,0.15);
-          color: #6b7280;
-        }
-        
-        .chapter-text-area {
-          flex: 1;
-          padding: 1.25rem;
-          overflow-y: auto;
-          display: flex;
-          flex-direction: column;
-        }
-        
-        .chapter-number {
-          font-size: 0.75rem;
-          font-weight: 600;
-          color: #a855f7;
-          text-transform: uppercase;
-          letter-spacing: 0.05em;
-          margin-bottom: 0.5rem;
-        }
-        
-        .chapter-text {
-          font-size: 1rem;
-          line-height: 1.7;
-          color: #374151;
-        }
-        
-        /* Ending page */
-        .mobile-page.ending {
-          background: linear-gradient(135deg, #fce7f3 0%, #f3e8ff 100%);
-        }
-        
-        .mobile-page.ending .page-content {
-          flex: 1;
-          display: flex;
-          flex-direction: column;
-          align-items: center;
-          justify-content: center;
-          padding: 2rem;
-          text-align: center;
-        }
-        
-        .ending-icon {
-          font-size: 4rem;
-          margin-bottom: 1rem;
-        }
-        
-        .ending-title {
-          font-size: 2rem;
-          font-weight: 700;
-          color: #7c3aed;
-          margin-bottom: 0.5rem;
-        }
-        
-        .ending-text {
-          font-size: 1.125rem;
-          color: #6b7280;
-          line-height: 1.6;
-          margin-bottom: 2rem;
-        }
-        
-        .ending-buttons {
-          display: flex;
-          flex-direction: column;
-          gap: 1rem;
-          width: 100%;
-          max-width: 280px;
-        }
-        
-        .ending-btn {
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          gap: 0.5rem;
-          padding: 1rem 1.5rem;
-          border-radius: 12px;
-          font-weight: 600;
-          font-size: 1rem;
-          border: none;
-          cursor: pointer;
-          transition: transform 0.2s;
-        }
-        
-        .ending-btn:active {
-          transform: scale(0.98);
-        }
-        
-        .ending-btn.primary {
-          background: linear-gradient(135deg, #7c3aed 0%, #ec4899 100%);
-          color: white;
-        }
-        
-        .ending-btn.secondary {
-          background: white;
-          color: #374151;
-          box-shadow: 0 2px 8px rgba(0,0,0,0.1);
-        }
-        
-        .ending-hint {
-          margin-top: 2rem;
-          font-size: 0.875rem;
-          color: #9ca3af;
-        }
-        
-        /* Dots navigation */
-        .mobile-dots {
-          position: fixed;
-          right: 0.75rem;
-          top: 50%;
-          transform: translateY(-50%);
-          display: flex;
-          flex-direction: column;
-          gap: 0.5rem;
-          z-index: 60;
-        }
-        
-        .mobile-dot {
-          width: 8px;
-          height: 8px;
-          border-radius: 50%;
-          background: rgba(255,255,255,0.4);
-          border: none;
-          padding: 0;
-          cursor: pointer;
-          transition: all 0.2s;
-        }
-        
-        .mobile-dot.active {
-          background: white;
-          transform: scale(1.3);
-        }
-        
-        /* Page counter */
-        .mobile-counter {
-          position: fixed;
-          bottom: 1rem;
-          left: 50%;
-          transform: translateX(-50%);
-          background: rgba(0,0,0,0.5);
-          color: white;
-          padding: 0.375rem 0.75rem;
-          border-radius: 1rem;
-          font-size: 0.75rem;
-          z-index: 60;
-        }
+        .viewer-root { position: fixed; inset: 0; background: #221610; z-index: 50; overflow: hidden; }
+        .progress-wrap { position: fixed; top: 0.8rem; left: 0.75rem; right: 0.75rem; display: flex; gap: 4px; z-index: 70; }
+        .progress-bar { height: 3px; border-radius: 99px; background: rgba(255,255,255,.3); flex: 1; }
+        .progress-bar.active { background: #ec5b13; }
+
+        .page-container { position: relative; width: 100%; height: 100dvh; perspective: 1200px; }
+        .page { position: absolute; inset: 0; transition: transform .45s ease, opacity .45s ease, visibility .45s ease; }
+        .page.next { transform: translateX(100%); visibility: hidden; }
+        .page.prev { transform: translateX(-100%); visibility: hidden; }
+        .page.active { transform: translateX(0); visibility: visible; z-index: 20; }
+
+        .cover, .chapter, .final { background: #111; }
+        .cover { background: linear-gradient(180deg, rgba(0,0,0,.4), rgba(0,0,0,.7)), #3d2b1f; }
+        .final { background: linear-gradient(180deg, rgba(255,255,255,.2), rgba(255,255,255,.2)), #d6c8bc; }
+
+        .chapter-image { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+        .chapter-image.placeholder { display: flex; align-items: center; justify-content: center; background: linear-gradient(135deg, #f3e8ff, #ffe4ea); }
+        .overlay { position: absolute; inset: 0; background: linear-gradient(to top, rgba(34,22,16,.8), rgba(34,22,16,.2) 45%, rgba(34,22,16,.45)); }
+        .overlay.light { background: transparent; }
+
+        .content-center { position: relative; z-index: 2; height: 100%; display: flex; flex-direction: column; justify-content: center; align-items: center; text-align: center; padding: 0 1.2rem; color: #f8f6f6; }
+        .cover-title { font-size: 2rem; line-height: 1.15; font-weight: 800; text-shadow: 0 4px 16px rgba(0,0,0,.35); }
+        .cover-subtitle { margin-top: 1rem; color: #ec5b13; font-size: 1.4rem; font-weight: 700; text-shadow: 0 4px 10px rgba(0,0,0,.25); }
+
+        .tap-start { position: absolute; z-index: 2; left: 0; right: 0; bottom: 4rem; text-align: center; color: #f1f5f9; font-weight: 700; letter-spacing: .16em; font-size: .7rem; text-transform: uppercase; }
+        .bounce { font-size: 1.8rem; margin-bottom: .2rem; animation: bounce 1.2s infinite; }
+        @keyframes bounce { 0%,100%{ transform:translateY(0)} 50%{ transform:translateY(6px)} }
+
+        .chapter-text-wrap { position: absolute; z-index: 2; bottom: 5.2rem; left: 1.2rem; right: 1.2rem; }
+        .chapter-text-wrap h1 { color: #fff; font-size: 1.45rem; line-height: 1.35; font-weight: 700; text-shadow: 0 3px 10px rgba(0,0,0,.45); }
+
+        .generate-btn { display:flex; flex-direction:column; align-items:center; gap:.8rem; color:#7c3aed; border:0; background:transparent; }
+        .generate-btn span { color:#475569; font-weight:600; }
+
+        .regen-btn { position:absolute; z-index:3; bottom:5.1rem; right:1rem; width:38px; height:38px; border-radius:999px; background:rgba(255,255,255,.9); border:0; display:flex; align-items:center; justify-content:center; }
+
+        .final-card { position: absolute; z-index: 2; left: 1.2rem; right: 1.2rem; top: 50%; transform: translateY(-50%); background: rgba(255,255,255,.65); backdrop-filter: blur(10px); border-radius: 1.25rem; padding: 2rem 1.2rem; text-align: center; box-shadow: 0 18px 44px rgba(0,0,0,.18); }
+        .final-card h1 { font-size: 2.2rem; font-weight: 800; color: #0f172a; }
+        .final-card p { margin-top: .6rem; font-size: 1.1rem; color: #1e293b; }
+        .download-btn { margin: 1.6rem auto 0; height: 52px; min-width: 200px; border-radius: 999px; border: 0; background: #ec5b13; color: white; font-weight: 700; display: flex; align-items: center; justify-content: center; gap: .55rem; }
+
+        .tap-zone { position: absolute; top: 0; bottom: 0; width: 25%; z-index: 40; background: transparent; border: 0; }
+        .tap-zone.left { left: 0; }
+        .tap-zone.right { right: 0; }
+        .hint { position: absolute; top: 50%; transform: translateY(-50%); z-index: 30; color: rgba(255,255,255,.3); pointer-events: none; }
+        .hint.left { left: 8px; }
+        .hint.right { right: 8px; }
+
+        .page-indicator { position: absolute; bottom: 1.25rem; left: 50%; transform: translateX(-50%); z-index: 55; color: rgba(255,255,255,.78); font-size: 10px; text-transform: uppercase; letter-spacing: .18em; font-weight: 700; background: rgba(0,0,0,.25); border-radius: 999px; padding: .35rem .75rem; backdrop-filter: blur(6px); }
       `}</style>
     </div>
   )
