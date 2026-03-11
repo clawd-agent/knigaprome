@@ -35,9 +35,27 @@ function mapAspectRatioByOrientation(orientation?: string): '9:16' | '16:9' | '1
   return '9:16';
 }
 
-async function callGeminiNative(prompt: string, orientation?: string): Promise<{ imageBuffer: Buffer; ext: 'png' | 'jpg' | 'webp'; endpoint: string; model: string }> {
+async function callGeminiNative(
+  prompt: string,
+  orientation?: string,
+  referencePhoto?: string
+): Promise<{ imageBuffer: Buffer; ext: 'png' | 'jpg' | 'webp'; endpoint: string; model: string }> {
+  const parts: Array<Record<string, unknown>> = [{ text: prompt }];
+
+  if (referencePhoto?.startsWith('data:image/')) {
+    const match = referencePhoto.match(/^data:(image\/[\w+.-]+);base64,(.+)$/);
+    if (match) {
+      parts.push({
+        inlineData: {
+          mimeType: match[1],
+          data: match[2],
+        },
+      });
+    }
+  }
+
   const payload = {
-    contents: [{ parts: [{ text: prompt }] }],
+    contents: [{ parts }],
     generationConfig: {
       responseModalities: ['IMAGE', 'TEXT'],
       imageConfig: {
@@ -68,8 +86,8 @@ async function callGeminiNative(prompt: string, orientation?: string): Promise<{
     throw new Error(data?.error?.message || `native HTTP ${resp.status} body=${text.slice(0, 240)}`);
   }
 
-  const parts = data?.candidates?.[0]?.content?.parts || [];
-  for (const part of parts) {
+  const responseParts = data?.candidates?.[0]?.content?.parts || [];
+  for (const part of responseParts) {
     const inline = part?.inlineData || part?.inline_data;
     if (inline?.data) {
       const imageBuffer = Buffer.from(inline.data, 'base64');
@@ -157,6 +175,7 @@ export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
     const { prompt, storyId, chapterNumber, referencePhotos, orientation } = body;
+    const firstReferencePhoto = Array.isArray(referencePhotos) ? referencePhotos[0] : undefined;
 
     if (!prompt || !storyId || chapterNumber === undefined) {
       return NextResponse.json(
@@ -169,25 +188,20 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'PROXYAPI_KEY не настроен' }, { status: 500 });
     }
 
-    if (Array.isArray(referencePhotos) && referencePhotos.length > 0) {
-      return NextResponse.json(
-        {
-          error:
-            'Референс-фото для этого endpoint пока не поддерживается. Используйте text-to-image режим без referencePhotos.',
-        },
-        { status: 400 }
-      );
-    }
-
     const enhancedPrompt = `Children's book watercolor illustration. ${prompt}. Full scene with rich detailed background, soft ink outlines, warm gentle lighting, hand-painted storybook style. Not a close-up portrait.`;
 
     let imageResult: { imageBuffer: Buffer; ext: 'png' | 'jpg' | 'webp'; endpoint: string; model: string };
 
-    try {
-      imageResult = await callGeminiViaOpenAICompat(enhancedPrompt);
-    } catch (openAiCompatError) {
-      console.warn('OpenAI-compatible Gemini failed, trying native Gemini endpoint...');
-      imageResult = await callGeminiNative(enhancedPrompt, orientation);
+    if (firstReferencePhoto) {
+      // Для режима с reference-photo сразу используем native Gemini с inlineData.
+      imageResult = await callGeminiNative(enhancedPrompt, orientation, firstReferencePhoto);
+    } else {
+      try {
+        imageResult = await callGeminiViaOpenAICompat(enhancedPrompt);
+      } catch (openAiCompatError) {
+        console.warn('OpenAI-compatible Gemini failed, trying native Gemini endpoint...');
+        imageResult = await callGeminiNative(enhancedPrompt, orientation);
+      }
     }
 
     const { imageBuffer, ext, endpoint, model } = imageResult;
