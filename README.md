@@ -18,7 +18,7 @@ AI-генератор персонализированных детских кн
 
 - **Frontend:** Next.js 14 + Tailwind CSS
 - **AI Text:** OpenAI GPT-4o-mini
-- **AI Images:** Replicate FLUX Kontext Pro
+- **AI Images:** Gemini 2.5 Flash Image (через ProxyAPI)
 - **PDF:** @react-pdf/renderer
 - **Database:** PostgreSQL + Prisma
 - **Payments:** ЮKassa
