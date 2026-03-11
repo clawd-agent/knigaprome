@@ -114,7 +114,7 @@ export default function Home() {
           ...prev,
           chapters: prev.chapters.map(c => 
             c.number === chapterNumber 
-              ? { ...c, image_url: data.image_url }
+              ? { ...c, image_url: data.image_data_url || data.image_url }
               : c
           ),
         }

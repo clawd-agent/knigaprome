@@ -23,6 +23,12 @@ function detectExt(buf: Buffer): 'png' | 'jpg' | 'webp' {
   return 'png';
 }
 
+function mimeFromExt(ext: 'png' | 'jpg' | 'webp'): string {
+  if (ext === 'jpg') return 'image/jpeg';
+  if (ext === 'webp') return 'image/webp';
+  return 'image/png';
+}
+
 function mapAspectRatioByOrientation(orientation?: string): '9:16' | '16:9' | '1:1' {
   if (orientation === 'landscape') return '16:9';
   if (orientation === 'square') return '1:1';
@@ -195,9 +201,13 @@ export async function POST(request: NextRequest) {
     const filePath = join(outputDir, filename);
     writeFileSync(filePath, imageBuffer);
 
+    const mime = mimeFromExt(ext);
+    const imageDataUrl = `data:${mime};base64,${imageBuffer.toString('base64')}`;
+
     return NextResponse.json({
       success: true,
       image_url: `/generated/${filename}`,
+      image_data_url: imageDataUrl,
       provider: `proxyapi-openai/${model}`,
       endpoint,
     });
