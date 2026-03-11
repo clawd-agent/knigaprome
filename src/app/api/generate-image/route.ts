@@ -1,77 +1,76 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { execSync } from 'child_process';
 import { writeFileSync, mkdirSync, existsSync } from 'fs';
 import { join } from 'path';
 
 const PROXYAPI_KEY = process.env.PROXYAPI_KEY || '';
-const OPENAI_IMAGE_ENDPOINT = 'https://api.proxyapi.ru/openai/v1/images/generations';
+const OPENAI_IMAGE_ENDPOINT =
+  process.env.OPENAI_IMAGE_ENDPOINT || 'https://openai.api.proxyapi.ru/v1/images/generations';
 const GEMINI_IMAGE_MODEL =
-  process.env.GEMINI_IMAGE_MODEL || 'gemini-2.0-flash-preview-image-generation';
+  process.env.GEMINI_IMAGE_MODEL || 'gemini/gemini-2.5-flash-image';
 
-function mapSizeByOrientation(orientation?: string): '1024x1024' | '1024x1536' | '1536x1024' {
-  if (orientation === 'landscape') return '1536x1024';
-  if (orientation === 'square') return '1024x1024';
-  return '1024x1536';
+function detectExt(buf: Buffer): 'png' | 'jpg' | 'webp' {
+  if (buf.length >= 8 && buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4e && buf[3] === 0x47) return 'png';
+  if (buf.length >= 3 && buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff) return 'jpg';
+  if (buf.length >= 12 && buf.toString('ascii', 0, 4) === 'RIFF' && buf.toString('ascii', 8, 12) === 'WEBP') return 'webp';
+  return 'png';
 }
 
-function callGeminiViaOpenAICompat(prompt: string, size: string): { imageBuffer: Buffer; ext: 'png' | 'jpg' } {
-  const payload = JSON.stringify({
+async function callGeminiViaOpenAICompat(prompt: string): Promise<{ imageBuffer: Buffer; ext: 'png' | 'jpg' | 'webp' }> {
+  const payload = {
     model: GEMINI_IMAGE_MODEL,
     prompt,
-    size,
     n: 1,
     response_format: 'b64_json',
+  };
+
+  const resp = await fetch(OPENAI_IMAGE_ENDPOINT, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${PROXYAPI_KEY}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(payload),
   });
 
-  const payloadPath = `/tmp/gemini-openai-image-payload-${Date.now()}.json`;
-  writeFileSync(payloadPath, payload);
+  const text = await resp.text();
+  let data: any;
+  try {
+    data = JSON.parse(text);
+  } catch {
+    throw new Error(`ProxyAPI non-JSON response (HTTP ${resp.status}): ${text.slice(0, 300)}`);
+  }
 
-  const raw = execSync(
-    `curl -s -X POST "${OPENAI_IMAGE_ENDPOINT}" \\
-      -H "Authorization: Bearer ${PROXYAPI_KEY}" \\
-      -H "Content-Type: application/json" \\
-      -d @${payloadPath}`,
-    {
-      encoding: 'utf-8',
-      timeout: 120000,
-      maxBuffer: 30 * 1024 * 1024,
-    }
-  );
-
-  const data = JSON.parse(raw);
-
-  if (data?.error) {
-    throw new Error(data.error?.message || JSON.stringify(data.error));
+  if (!resp.ok) {
+    throw new Error(data?.error?.message || `ProxyAPI HTTP ${resp.status}`);
   }
 
   const item = data?.data?.[0];
   if (!item) {
-    throw new Error('Gemini(OpenAI-compat): пустой ответ');
+    throw new Error('Gemini(OpenAI-compat): empty data[]');
   }
 
   if (item.b64_json) {
-    return {
-      imageBuffer: Buffer.from(item.b64_json, 'base64'),
-      ext: 'png',
-    };
+    const imageBuffer = Buffer.from(item.b64_json, 'base64');
+    return { imageBuffer, ext: detectExt(imageBuffer) };
   }
 
   if (item.url) {
-    const downloaded = execSync(`curl -sL "${item.url}"`, {
-      encoding: 'buffer',
-      timeout: 60000,
-      maxBuffer: 50 * 1024 * 1024,
-    });
-    return { imageBuffer: downloaded, ext: 'png' };
+    const imgResp = await fetch(item.url);
+    if (!imgResp.ok) {
+      throw new Error(`Failed to download generated image: HTTP ${imgResp.status}`);
+    }
+    const arr = await imgResp.arrayBuffer();
+    const imageBuffer = Buffer.from(arr);
+    return { imageBuffer, ext: detectExt(imageBuffer) };
   }
 
-  throw new Error('Gemini(OpenAI-compat): не найден b64_json/url в ответе');
+  throw new Error('Gemini(OpenAI-compat): no b64_json/url in response');
 }
 
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { prompt, storyId, chapterNumber, orientation } = body;
+    const { prompt, storyId, chapterNumber, referencePhotos } = body;
 
     if (!prompt || !storyId || chapterNumber === undefined) {
       return NextResponse.json(
@@ -84,12 +83,19 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'PROXYAPI_KEY не настроен' }, { status: 500 });
     }
 
-    const size = mapSizeByOrientation(orientation);
+    if (Array.isArray(referencePhotos) && referencePhotos.length > 0) {
+      return NextResponse.json(
+        {
+          error:
+            'Референс-фото для этого endpoint пока не поддерживается. Используйте text-to-image режим без referencePhotos.',
+        },
+        { status: 400 }
+      );
+    }
+
     const enhancedPrompt = `Children's book watercolor illustration. ${prompt}. Full scene with rich detailed background, soft ink outlines, warm gentle lighting, hand-painted storybook style. Not a close-up portrait.`;
 
-    console.log(`🎨 Generating ch${chapterNumber} via Gemini OpenAI-compat (${GEMINI_IMAGE_MODEL}, ${size})...`);
-
-    const { imageBuffer, ext } = callGeminiViaOpenAICompat(enhancedPrompt, size);
+    const { imageBuffer, ext } = await callGeminiViaOpenAICompat(enhancedPrompt);
 
     const outputDir = process.env.GENERATED_OUTPUT_DIR || join(process.cwd(), 'public', 'generated');
     if (!existsSync(outputDir)) {
@@ -104,7 +110,6 @@ export async function POST(request: NextRequest) {
       success: true,
       image_url: `/generated/${filename}`,
       provider: `proxyapi-openai/${GEMINI_IMAGE_MODEL}`,
-      size,
     });
   } catch (error) {
     console.error('Image generation error:', error);
