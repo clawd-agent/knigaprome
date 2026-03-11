@@ -1,7 +1,7 @@
 'use client'
 
 import { useMemo, useState } from 'react'
-import { Loader2, Wand2, RefreshCw, Download, ChevronLeft, ChevronRight } from 'lucide-react'
+import { Loader2, Wand2, RefreshCw, Sparkles, ChevronLeft, ChevronRight } from 'lucide-react'
 
 interface Chapter {
   number: number
@@ -19,6 +19,7 @@ interface MobileBookPreviewProps {
   generatingImage: number | null
   onDownloadPDF?: () => void
   downloadingPDF?: boolean
+  onCreateAnotherStory: () => void
 }
 
 type Page =
@@ -32,8 +33,7 @@ export default function MobileBookPreview({
   chapters,
   onGenerateImage,
   generatingImage,
-  onDownloadPDF,
-  downloadingPDF,
+  onCreateAnotherStory,
 }: MobileBookPreviewProps) {
   const pages = useMemo<Page[]>(
     () => [{ type: 'cover' }, ...chapters.map((c) => ({ type: 'chapter' as const, chapter: c })), { type: 'final' }],
@@ -80,9 +80,9 @@ export default function MobileBookPreview({
                 <div className="final-card">
                   <h1>The End</h1>
                   <p>Надеюсь, приключение понравилось, {childName}!</p>
-                  <button onClick={onDownloadPDF} disabled={downloadingPDF} className="download-btn">
-                    {downloadingPDF ? <Loader2 className="w-5 h-5 animate-spin" /> : <Download className="w-5 h-5" />}
-                    <span>Download PDF</span>
+                  <button onClick={onCreateAnotherStory} className="download-btn">
+                    <Sparkles className="w-5 h-5" />
+                    <span>Сделать ещё одну историю</span>
                   </button>
                 </div>
               </div>

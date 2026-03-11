@@ -221,6 +221,7 @@ export default function Home() {
             generatingImage={generatingImage}
             onDownloadPDF={downloadPDF}
             downloadingPDF={downloadingPDF}
+            onCreateAnotherStory={() => setStory(null)}
           />
         </>
       )
