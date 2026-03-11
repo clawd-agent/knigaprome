@@ -4,45 +4,30 @@ import { writeFileSync, mkdirSync, existsSync } from 'fs';
 import { join } from 'path';
 
 const PROXYAPI_KEY = process.env.PROXYAPI_KEY || '';
-const GEMINI_IMAGE_ENDPOINT =
-  'https://api.proxyapi.ru/google/v1beta/models/gemini-2.5-flash-image:generateContent';
+const OPENAI_IMAGE_ENDPOINT = 'https://api.proxyapi.ru/openai/v1/images/generations';
+const GEMINI_IMAGE_MODEL =
+  process.env.GEMINI_IMAGE_MODEL || 'gemini-2.0-flash-preview-image-generation';
 
-function mapAspectRatioByOrientation(orientation?: string): '9:16' | '16:9' | '1:1' {
-  if (orientation === 'landscape') return '16:9';
-  if (orientation === 'square') return '1:1';
-  return '9:16';
+function mapSizeByOrientation(orientation?: string): '1024x1024' | '1024x1536' | '1536x1024' {
+  if (orientation === 'landscape') return '1536x1024';
+  if (orientation === 'square') return '1024x1024';
+  return '1024x1536';
 }
 
-function callGeminiFlashImage(prompt: string, aspectRatio: string, referencePhoto?: string): { imageBuffer: Buffer; ext: 'png' | 'jpg' } {
-  const parts: Array<Record<string, unknown>> = [{ text: `Generate one children book illustration: ${prompt}` }];
-
-  if (referencePhoto?.startsWith('data:image/')) {
-    const match = referencePhoto.match(/^data:(image\/[\w+.-]+);base64,(.+)$/);
-    if (match) {
-      parts.push({
-        inlineData: {
-          mimeType: match[1],
-          data: match[2],
-        },
-      });
-    }
-  }
-
+function callGeminiViaOpenAICompat(prompt: string, size: string): { imageBuffer: Buffer; ext: 'png' | 'jpg' } {
   const payload = JSON.stringify({
-    contents: [{ parts }],
-    generationConfig: {
-      responseModalities: ['IMAGE', 'TEXT'],
-      imageConfig: {
-        aspectRatio,
-      },
-    },
+    model: GEMINI_IMAGE_MODEL,
+    prompt,
+    size,
+    n: 1,
+    response_format: 'b64_json',
   });
 
-  const payloadPath = `/tmp/gemini-image-payload-${Date.now()}.json`;
+  const payloadPath = `/tmp/gemini-openai-image-payload-${Date.now()}.json`;
   writeFileSync(payloadPath, payload);
 
   const raw = execSync(
-    `curl -s -X POST "${GEMINI_IMAGE_ENDPOINT}" \\
+    `curl -s -X POST "${OPENAI_IMAGE_ENDPOINT}" \\
       -H "Authorization: Bearer ${PROXYAPI_KEY}" \\
       -H "Content-Type: application/json" \\
       -d @${payloadPath}`,
@@ -54,26 +39,39 @@ function callGeminiFlashImage(prompt: string, aspectRatio: string, referencePhot
   );
 
   const data = JSON.parse(raw);
-  const responseParts = data?.candidates?.[0]?.content?.parts || [];
 
-  for (const part of responseParts) {
-    const inline = part.inlineData || part.inline_data;
-    if (inline?.data) {
-      const mimeType = inline.mimeType || inline.mime_type || 'image/png';
-      return {
-        imageBuffer: Buffer.from(inline.data, 'base64'),
-        ext: mimeType.includes('jpeg') || mimeType.includes('jpg') ? 'jpg' : 'png',
-      };
-    }
+  if (data?.error) {
+    throw new Error(data.error?.message || JSON.stringify(data.error));
   }
 
-  throw new Error('Gemini не вернул изображение');
+  const item = data?.data?.[0];
+  if (!item) {
+    throw new Error('Gemini(OpenAI-compat): пустой ответ');
+  }
+
+  if (item.b64_json) {
+    return {
+      imageBuffer: Buffer.from(item.b64_json, 'base64'),
+      ext: 'png',
+    };
+  }
+
+  if (item.url) {
+    const downloaded = execSync(`curl -sL "${item.url}"`, {
+      encoding: 'buffer',
+      timeout: 60000,
+      maxBuffer: 50 * 1024 * 1024,
+    });
+    return { imageBuffer: downloaded, ext: 'png' };
+  }
+
+  throw new Error('Gemini(OpenAI-compat): не найден b64_json/url в ответе');
 }
 
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { prompt, storyId, chapterNumber, orientation, referencePhotos } = body;
+    const { prompt, storyId, chapterNumber, orientation } = body;
 
     if (!prompt || !storyId || chapterNumber === undefined) {
       return NextResponse.json(
@@ -83,22 +81,15 @@ export async function POST(request: NextRequest) {
     }
 
     if (!PROXYAPI_KEY) {
-      return NextResponse.json(
-        { error: 'PROXYAPI_KEY не настроен' },
-        { status: 500 }
-      );
+      return NextResponse.json({ error: 'PROXYAPI_KEY не настроен' }, { status: 500 });
     }
 
-    const aspectRatio = mapAspectRatioByOrientation(orientation);
+    const size = mapSizeByOrientation(orientation);
     const enhancedPrompt = `Children's book watercolor illustration. ${prompt}. Full scene with rich detailed background, soft ink outlines, warm gentle lighting, hand-painted storybook style. Not a close-up portrait.`;
 
-    console.log(`🎨 Generating ch${chapterNumber} via Gemini 2.5 Flash Image (${aspectRatio})...`);
+    console.log(`🎨 Generating ch${chapterNumber} via Gemini OpenAI-compat (${GEMINI_IMAGE_MODEL}, ${size})...`);
 
-    const { imageBuffer, ext } = callGeminiFlashImage(
-      enhancedPrompt,
-      aspectRatio,
-      Array.isArray(referencePhotos) ? referencePhotos[0] : undefined
-    );
+    const { imageBuffer, ext } = callGeminiViaOpenAICompat(enhancedPrompt, size);
 
     const outputDir = process.env.GENERATED_OUTPUT_DIR || join(process.cwd(), 'public', 'generated');
     if (!existsSync(outputDir)) {
@@ -112,8 +103,8 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({
       success: true,
       image_url: `/generated/${filename}`,
-      provider: 'gemini-2.5-flash-image',
-      aspectRatio,
+      provider: `proxyapi-openai/${GEMINI_IMAGE_MODEL}`,
+      size,
     });
   } catch (error) {
     console.error('Image generation error:', error);
