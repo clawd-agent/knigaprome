@@ -259,30 +259,19 @@ export default function Home() {
           {/* CTA секция */}
           <div className="mt-12 bg-white rounded-3xl shadow-xl p-8 text-center">
             <h2 className="font-display text-2xl font-bold mb-4">
-              Понравилась книга?
+              Понравилась история?
             </h2>
             <p className="text-gray-600 mb-8 max-w-md mx-auto">
-              Сгенерируйте все иллюстрации и скачайте готовый PDF 
-              или закажите печатную версию!
+              Давайте сделаем ещё одну — с новым сюжетом и новым героем.
             </p>
             
             <div className="flex flex-wrap justify-center gap-4">
-              <button 
-                onClick={downloadPDF}
-                disabled={downloadingPDF}
-                className="bg-primary hover:bg-purple-700 disabled:bg-purple-300 text-white font-bold px-8 py-4 rounded-xl flex items-center gap-2 transition-all transform hover:scale-105 disabled:scale-100"
+              <button
+                onClick={() => setStory(null)}
+                className="bg-primary hover:bg-purple-700 text-white font-bold px-8 py-4 rounded-xl flex items-center gap-2 transition-all transform hover:scale-105"
               >
-                {downloadingPDF ? (
-                  <>
-                    <Loader2 className="w-5 h-5 animate-spin" />
-                    Создаём PDF...
-                  </>
-                ) : (
-                  <>
-                    <Download className="w-5 h-5" />
-                    Скачать PDF (демо)
-                  </>
-                )}
+                <Sparkles className="w-5 h-5" />
+                Сделать ещё одну историю
               </button>
               <button className="bg-pink-500 hover:bg-pink-600 text-white font-bold px-8 py-4 rounded-xl flex items-center gap-2 transition-all transform hover:scale-105">
                 <Book className="w-5 h-5" />
@@ -291,7 +280,7 @@ export default function Home() {
             </div>
             
             <p className="mt-4 text-sm text-gray-400">
-              💡 Сгенерируйте картинки для всех глав перед скачиванием PDF
+              💡 Можете менять имя, возраст и интересы — история будет другой
             </p>
           </div>
         </div>
