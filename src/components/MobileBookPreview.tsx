@@ -96,19 +96,10 @@ export default function MobileBookPreview({
                 <img src={chapter.image_url} alt={`Глава ${chapter.number}`} className="chapter-image" />
               ) : (
                 <div className="chapter-image placeholder">
-                  <button onClick={() => onGenerateImage(chapter.number)} disabled={generatingImage !== null} className="generate-btn">
-                    {generatingImage === chapter.number ? (
-                      <>
-                        <Loader2 className="w-9 h-9 animate-spin" />
-                        <span>Рисую картинку...</span>
-                      </>
-                    ) : (
-                      <>
-                        <Wand2 className="w-9 h-9" />
-                        <span>Сгенерировать иллюстрацию</span>
-                      </>
-                    )}
-                  </button>
+                  <div className="placeholder-hint">
+                    <Wand2 className="w-9 h-9" />
+                    <span>Иллюстрация ещё не сгенерирована</span>
+                  </div>
                 </div>
               )}
 
@@ -117,7 +108,28 @@ export default function MobileBookPreview({
                 <h1>{chapter.text}</h1>
               </div>
 
-              {chapter.image_url && (
+              {!chapter.image_url ? (
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    onGenerateImage(chapter.number)
+                  }}
+                  disabled={generatingImage !== null}
+                  className="generate-cta"
+                >
+                  {generatingImage === chapter.number ? (
+                    <>
+                      <Loader2 className="w-5 h-5 animate-spin" />
+                      <span>Генерирую...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Wand2 className="w-5 h-5" />
+                      <span>Сгенерировать иллюстрацию</span>
+                    </>
+                  )}
+                </button>
+              ) : (
                 <button onClick={() => onGenerateImage(chapter.number)} disabled={generatingImage !== null} className="regen-btn">
                   <RefreshCw className="w-4 h-4" />
                 </button>
@@ -167,10 +179,32 @@ export default function MobileBookPreview({
         .chapter-text-wrap { position: absolute; z-index: 2; bottom: 5.2rem; left: 1.2rem; right: 1.2rem; }
         .chapter-text-wrap h1 { color: #fff; font-size: 1.45rem; line-height: 1.35; font-weight: 700; text-shadow: 0 3px 10px rgba(0,0,0,.45); }
 
-        .generate-btn { display:flex; flex-direction:column; align-items:center; gap:.8rem; color:#7c3aed; border:0; background:transparent; }
-        .generate-btn span { color:#475569; font-weight:600; }
+        .placeholder-hint { display:flex; flex-direction:column; align-items:center; gap:.7rem; color:#7c3aed; }
+        .placeholder-hint span { color:#475569; font-weight:600; }
 
-        .regen-btn { position:absolute; z-index:3; bottom:5.1rem; right:1rem; width:38px; height:38px; border-radius:999px; background:rgba(255,255,255,.9); border:0; display:flex; align-items:center; justify-content:center; }
+        .generate-cta {
+          position: absolute;
+          z-index: 56;
+          left: 50%;
+          transform: translateX(-50%);
+          bottom: 4.9rem;
+          height: 46px;
+          min-width: 240px;
+          padding: 0 1rem;
+          border-radius: 999px;
+          border: 0;
+          background: #ec5b13;
+          color: #fff;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          gap: .5rem;
+          font-weight: 700;
+          box-shadow: 0 8px 24px rgba(0,0,0,.3);
+        }
+        .generate-cta:disabled { opacity: .7; }
+
+        .regen-btn { position:absolute; z-index:56; bottom:5.1rem; right:1rem; width:38px; height:38px; border-radius:999px; background:rgba(255,255,255,.9); border:0; display:flex; align-items:center; justify-content:center; }
 
         .final-card { position: absolute; z-index: 2; left: 1.2rem; right: 1.2rem; top: 50%; transform: translateY(-50%); background: rgba(255,255,255,.65); backdrop-filter: blur(10px); border-radius: 1.25rem; padding: 2rem 1.2rem; text-align: center; box-shadow: 0 18px 44px rgba(0,0,0,.18); }
         .final-card h1 { font-size: 2.2rem; font-weight: 800; color: #0f172a; }
