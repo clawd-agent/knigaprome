@@ -11,6 +11,11 @@ const PROXYAPI_BASE_URLS = BASE_URL_ENV
   : ['https://api.proxyapi.ru/openai/v1', 'https://openai.api.proxyapi.ru/v1'];
 const GEMINI_IMAGE_MODEL =
   process.env.GEMINI_IMAGE_MODEL || 'gemini/gemini-2.5-flash-image';
+const MODEL_CANDIDATES = [
+  GEMINI_IMAGE_MODEL,
+  'gemini-2.5-flash-image',
+  'gemini-2.0-flash-preview-image-generation',
+].filter((v, i, a) => a.indexOf(v) === i);
 
 function detectExt(buf: Buffer): 'png' | 'jpg' | 'webp' {
   if (buf.length >= 8 && buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4e && buf[3] === 0x47) return 'png';
@@ -19,65 +24,68 @@ function detectExt(buf: Buffer): 'png' | 'jpg' | 'webp' {
   return 'png';
 }
 
-async function callGeminiViaOpenAICompat(prompt: string): Promise<{ imageBuffer: Buffer; ext: 'png' | 'jpg' | 'webp'; endpoint: string }> {
-  const payload = {
-    model: GEMINI_IMAGE_MODEL,
-    prompt,
-    n: 1,
-    response_format: 'b64_json',
-  };
-
+async function callGeminiViaOpenAICompat(prompt: string): Promise<{ imageBuffer: Buffer; ext: 'png' | 'jpg' | 'webp'; endpoint: string; model: string }> {
   const errors: string[] = [];
 
   for (const baseUrl of PROXYAPI_BASE_URLS) {
     const endpoint = `${baseUrl.replace(/\/$/, '')}/images/generations`;
-    try {
-      const resp = await fetch(endpoint, {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${PROXYAPI_KEY}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(payload),
-        signal: AbortSignal.timeout(45000),
-      });
 
-      const text = await resp.text();
-      let data: any;
+    for (const model of MODEL_CANDIDATES) {
+      const payload = {
+        model,
+        prompt,
+        n: 1,
+        size: '1024x1024',
+      };
+
       try {
-        data = JSON.parse(text);
-      } catch {
-        throw new Error(`non-JSON response (HTTP ${resp.status}): ${text.slice(0, 300)}`);
-      }
+        const resp = await fetch(endpoint, {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${PROXYAPI_KEY}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(payload),
+          signal: AbortSignal.timeout(45000),
+        });
 
-      if (!resp.ok) {
-        throw new Error(data?.error?.message || `HTTP ${resp.status}`);
-      }
-
-      const item = data?.data?.[0];
-      if (!item) {
-        throw new Error('empty data[]');
-      }
-
-      if (item.b64_json) {
-        const imageBuffer = Buffer.from(item.b64_json, 'base64');
-        return { imageBuffer, ext: detectExt(imageBuffer), endpoint };
-      }
-
-      if (item.url) {
-        const imgResp = await fetch(item.url, { signal: AbortSignal.timeout(45000) });
-        if (!imgResp.ok) {
-          throw new Error(`image download HTTP ${imgResp.status}`);
+        const text = await resp.text();
+        let data: any;
+        try {
+          data = JSON.parse(text);
+        } catch {
+          throw new Error(`non-JSON response (HTTP ${resp.status}): ${text.slice(0, 300)}`);
         }
-        const arr = await imgResp.arrayBuffer();
-        const imageBuffer = Buffer.from(arr);
-        return { imageBuffer, ext: detectExt(imageBuffer), endpoint };
-      }
 
-      throw new Error('no b64_json/url in response');
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      errors.push(`${endpoint} -> ${msg}`);
+        if (!resp.ok) {
+          throw new Error(data?.error?.message || `HTTP ${resp.status} body=${text.slice(0, 240)}`);
+        }
+
+        const item = data?.data?.[0] ?? data?.output?.[0];
+        if (!item) {
+          throw new Error(`empty data[] body=${text.slice(0, 240)}`);
+        }
+
+        if (item.b64_json) {
+          const imageBuffer = Buffer.from(item.b64_json, 'base64');
+          return { imageBuffer, ext: detectExt(imageBuffer), endpoint, model };
+        }
+
+        if (item.url) {
+          const imgResp = await fetch(item.url, { signal: AbortSignal.timeout(45000) });
+          if (!imgResp.ok) {
+            throw new Error(`image download HTTP ${imgResp.status}`);
+          }
+          const arr = await imgResp.arrayBuffer();
+          const imageBuffer = Buffer.from(arr);
+          return { imageBuffer, ext: detectExt(imageBuffer), endpoint, model };
+        }
+
+        throw new Error(`no b64_json/url in response body=${text.slice(0, 240)}`);
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        errors.push(`${endpoint} [${model}] -> ${msg}`);
+      }
     }
   }
 
@@ -112,7 +120,7 @@ export async function POST(request: NextRequest) {
 
     const enhancedPrompt = `Children's book watercolor illustration. ${prompt}. Full scene with rich detailed background, soft ink outlines, warm gentle lighting, hand-painted storybook style. Not a close-up portrait.`;
 
-    const { imageBuffer, ext, endpoint } = await callGeminiViaOpenAICompat(enhancedPrompt);
+    const { imageBuffer, ext, endpoint, model } = await callGeminiViaOpenAICompat(enhancedPrompt);
 
     const outputDir = process.env.GENERATED_OUTPUT_DIR || join(process.cwd(), 'public', 'generated');
     if (!existsSync(outputDir)) {
@@ -126,7 +134,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({
       success: true,
       image_url: `/generated/${filename}`,
-      provider: `proxyapi-openai/${GEMINI_IMAGE_MODEL}`,
+      provider: `proxyapi-openai/${model}`,
       endpoint,
     });
   } catch (error) {
