@@ -11,17 +11,72 @@ const PROXYAPI_BASE_URLS = BASE_URL_ENV
   : ['https://api.proxyapi.ru/openai/v1', 'https://openai.api.proxyapi.ru/v1'];
 const GEMINI_IMAGE_MODEL =
   process.env.GEMINI_IMAGE_MODEL || 'gemini/gemini-2.5-flash-image';
-const MODEL_CANDIDATES = [
-  GEMINI_IMAGE_MODEL,
-  'gemini-2.5-flash-image',
-  'gemini-2.0-flash-preview-image-generation',
-].filter((v, i, a) => a.indexOf(v) === i);
+const GEMINI_NATIVE_ENDPOINT =
+  process.env.GEMINI_NATIVE_ENDPOINT ||
+  'https://api.proxyapi.ru/google/v1beta/models/gemini-2.5-flash-image:generateContent';
+const MODEL_CANDIDATES = [GEMINI_IMAGE_MODEL].filter((v, i, a) => a.indexOf(v) === i);
 
 function detectExt(buf: Buffer): 'png' | 'jpg' | 'webp' {
   if (buf.length >= 8 && buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4e && buf[3] === 0x47) return 'png';
   if (buf.length >= 3 && buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff) return 'jpg';
   if (buf.length >= 12 && buf.toString('ascii', 0, 4) === 'RIFF' && buf.toString('ascii', 8, 12) === 'WEBP') return 'webp';
   return 'png';
+}
+
+function mapAspectRatioByOrientation(orientation?: string): '9:16' | '16:9' | '1:1' {
+  if (orientation === 'landscape') return '16:9';
+  if (orientation === 'square') return '1:1';
+  return '9:16';
+}
+
+async function callGeminiNative(prompt: string, orientation?: string): Promise<{ imageBuffer: Buffer; ext: 'png' | 'jpg' | 'webp'; endpoint: string; model: string }> {
+  const payload = {
+    contents: [{ parts: [{ text: prompt }] }],
+    generationConfig: {
+      responseModalities: ['IMAGE', 'TEXT'],
+      imageConfig: {
+        aspectRatio: mapAspectRatioByOrientation(orientation),
+      },
+    },
+  };
+
+  const resp = await fetch(GEMINI_NATIVE_ENDPOINT, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${PROXYAPI_KEY}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(payload),
+    signal: AbortSignal.timeout(45000),
+  });
+
+  const text = await resp.text();
+  let data: any;
+  try {
+    data = JSON.parse(text);
+  } catch {
+    throw new Error(`native non-JSON (HTTP ${resp.status}): ${text.slice(0, 300)}`);
+  }
+
+  if (!resp.ok) {
+    throw new Error(data?.error?.message || `native HTTP ${resp.status} body=${text.slice(0, 240)}`);
+  }
+
+  const parts = data?.candidates?.[0]?.content?.parts || [];
+  for (const part of parts) {
+    const inline = part?.inlineData || part?.inline_data;
+    if (inline?.data) {
+      const imageBuffer = Buffer.from(inline.data, 'base64');
+      return {
+        imageBuffer,
+        ext: detectExt(imageBuffer),
+        endpoint: GEMINI_NATIVE_ENDPOINT,
+        model: 'gemini-2.5-flash-image(native)',
+      };
+    }
+  }
+
+  throw new Error(`native empty image parts body=${text.slice(0, 240)}`);
 }
 
 async function callGeminiViaOpenAICompat(prompt: string): Promise<{ imageBuffer: Buffer; ext: 'png' | 'jpg' | 'webp'; endpoint: string; model: string }> {
@@ -95,7 +150,7 @@ async function callGeminiViaOpenAICompat(prompt: string): Promise<{ imageBuffer:
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { prompt, storyId, chapterNumber, referencePhotos } = body;
+    const { prompt, storyId, chapterNumber, referencePhotos, orientation } = body;
 
     if (!prompt || !storyId || chapterNumber === undefined) {
       return NextResponse.json(
@@ -120,7 +175,16 @@ export async function POST(request: NextRequest) {
 
     const enhancedPrompt = `Children's book watercolor illustration. ${prompt}. Full scene with rich detailed background, soft ink outlines, warm gentle lighting, hand-painted storybook style. Not a close-up portrait.`;
 
-    const { imageBuffer, ext, endpoint, model } = await callGeminiViaOpenAICompat(enhancedPrompt);
+    let imageResult: { imageBuffer: Buffer; ext: 'png' | 'jpg' | 'webp'; endpoint: string; model: string };
+
+    try {
+      imageResult = await callGeminiViaOpenAICompat(enhancedPrompt);
+    } catch (openAiCompatError) {
+      console.warn('OpenAI-compatible Gemini failed, trying native Gemini endpoint...');
+      imageResult = await callGeminiNative(enhancedPrompt, orientation);
+    }
+
+    const { imageBuffer, ext, endpoint, model } = imageResult;
 
     const outputDir = process.env.GENERATED_OUTPUT_DIR || join(process.cwd(), 'public', 'generated');
     if (!existsSync(outputDir)) {
