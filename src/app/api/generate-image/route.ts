@@ -33,11 +33,16 @@ function callGeminiFlashImage(prompt: string, referencePhoto?: string): { base64
     },
   });
 
+  // Важно: не передаём payload через аргумент -d '<json>' — на больших base64 это даёт E2BIG.
+  // Пишем JSON во временный файл и отправляем -d @file.
+  const payloadPath = `/tmp/gemini-image-payload-${Date.now()}.json`;
+  writeFileSync(payloadPath, payload);
+
   const result = execSync(
     `curl -s -X POST "${GEMINI_IMAGE_ENDPOINT}" \\
       -H "Authorization: Bearer ${PROXYAPI_KEY}" \\
       -H "Content-Type: application/json" \\
-      -d '${payload.replace(/'/g, "'\\''")}'`,
+      -d @${payloadPath}`,
     {
       encoding: 'utf-8',
       timeout: 90000,
